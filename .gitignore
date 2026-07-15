@@ -1,3 +1,25 @@
 # Pix Agent
 .pi/
 .pi-lens/
+
+# Voice CLI (legacy standalone)
+voice/target/
+
+# Ingester
+ingester/node_modules/
+ingester/bun.lock
+
+# Web app
+app/node_modules/
+app/.next/
+app/out/
+
+# CLI
+cli/node_modules/
+cli/bun.lock
+
+# Local app data (SQLite DB + pushed episodes)
+data/
+
+# Local voice DBs (default lives in ~/.content-learn/)
+*.db

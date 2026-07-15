@@ -1,0 +1,19 @@
+{
+  "name": "content-from-shipping-ingester",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Parse pi agent sessions into structured 'episodes' for content generation.",
+  "bin": {
+    "episode-ingest": "./src/index.ts"
+  },
+  "scripts": {
+    "episodes": "bun run src/index.ts episodes",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
