@@ -1,82 +1,42 @@
 # content-from-shipping
 
-Turn your shipping — pi agent sessions (and soon git + Linear) — into content (devlogs, changelogs, social posts) that sounds like you, and gets better every time you edit a draft.
+Turn pi agent sessions into content — devlogs, changelogs, social posts — in your voice, and learn voice from every edit.
 
-Inspired by [Notra](https://github.com/usenotra/notra) (the pipeline idea, not the code). Built on the [email-for-agents](https://github.com/collinpfeifer/email-for-agents) principle: **the agent does all the reasoning; the dumb tools just store and retrieve.**
+**It's just a skill.** No server, no CLI bridge, no database. The agent (pi, in the terminal) does all the reasoning: it reads session files directly, drafts markdown, and learns voice lessons from your edits via `git diff`. Files are the store; git is the diff engine.
 
-## How it works
+## What's here
 
-```
-  pi (terminal, the brain)        cfs CLI (dumb pipe)          web app (store + diff + UI)
-  ──────────────────────          ──────────────────           ──────────────────────────
-  build episode ─┐                episode/draft/final/lesson   SQLite (episodes, posts,
-  draft content  ├──►  cfs  ──────────────────────────────►    lessons). computes the
-  you edit       ┤                                              draft→final diff.
-  derive lessons ┘            ◄── cfs posts/lessons (read)      Next.js + Tailwind dashboard
-```
+| Path | What |
+|---|---|
+| `skills/content-from-shipping/SKILL.md` | The skill. Teaches the agent to pull conversation history, draft, and learn from edits. |
+| `voice/` | Legacy standalone lesson store (Rust, forked from email-for-agents). **Orphaned** — lessons now live in `~/content/VOICE.md`. Kept for reference; safe to delete. |
 
-- **pi** stays in the terminal: it picks what's worth writing, drafts it, and derives voice lessons from your edits. No model code lives in the app.
-- **`cfs`** is a thin HTTP client that pushes episodes/drafts/finals/lessons to the web app's API.
-- **The web app** is the single source of truth: it stores content, computes draft→final diffs, and shows everything in a dashboard with an editor.
-
-The loop: pi drafts from an episode → you edit in the web UI → the app diffs it → pi reads the diff, derives voice lessons, pushes them → next draft applies those lessons. Voice compounds from edits. (No seed corpus — it learns purely from diffs going forward.)
-
-## Repo layout
+## How the loop works
 
 ```
-app/        Next.js (run on Bun) + Tailwind — the dashboard + API + SQLite store
-cli/        cfs — the CLI bridge pi calls to push content to the app
-ingester/   episode builder (Bun/TS) — parses pi sessions into structured episodes
-skills/     content-from-shipping/SKILL.md — the skill that orchestrates the loop in pi
-voice/      content-learn — the original standalone Rust voice-store CLI (legacy;
-            the web app is now the store, but this is kept for reference/offline use)
-scripts/    helpers
+~/.pi/agent/sessions/*.jsonl   ──agent reads──▶   draft in ~/content/drafts/*.md
+                                                      │ you edit in place
+                                                      ▼
+              ~/content/VOICE.md  ◀──agent derives──  git diff (your edits)
 ```
+
+1. **Pull history** — the agent reads `~/.pi/agent/sessions/<repo-basename>/*.jsonl` and finds work worth writing about. The reasoning traces (`thinking` blocks) are the gold for narrative.
+2. **Draft** — markdown written to `~/content/drafts/<date>-<slug>.md`, then committed (baseline for diffing).
+3. **You edit** — in any editor, in place.
+4. **Learn** — the agent reads `git diff`, derives voice lessons (how you write, not what), and appends them to `~/content/VOICE.md`. Read back before the next draft.
 
 ## Install
 
-```bash
-# 1. Web app + ingester + CLI deps
-cd app && bun install && cd ..
-cd cli && bun install && cd ..
-cd ingester && bun install
+```sh
+# link the skill so pi discovers it (point at your clone)
+ln -sfn "$PWD/skills/content-from-shipping" ~/.pi/agent/skills/content-from-shipping
 
-# 2. Run the web app
-cd app && bun run dev      # → http://localhost:3737
-
-# 3. (optional) alias the CLI so pi calls it as `cfs`
-alias cfs='bun run ~/GitHub/content-from-shipping/cli/src/index.ts'
+# bootstrap the content workspace
+mkdir -p ~/content/drafts && cd ~/content && git init
 ```
 
-## The CLI (`cfs`)
+Then in any pi session, ask it to draft a devlog from recent work. The skill activates.
 
-```bash
-cfs episode --repo <path> [--days N|--since ISO] [--until ISO]   # build + push episode
-cfs draft <file|-> [--episode N] [--type devlog] [--source ...] [--context ...] [--tags a,b]
-cfs final <postId> <file|->                                       # push final → app computes diff
-cfs lesson "<lesson>" [--post N] [--tags a,b]                     # store a voice lesson
-cfs episodes | cfs posts | cfs lessons                            # read back
-```
+## Why no app?
 
-Config: `CFS_URL` (default `http://localhost:3737`), `CFS_ROOT` (repo root).
-
-## The loop, end to end
-
-In a pi session (skill `content-from-shipping`):
-
-1. `cfs episode --repo /path/to/repo --days 7` → pi reads the episode, drafts a post.
-2. `cfs draft post.md --episode <id> --type devlog` → draft appears in the web app.
-3. You open `/posts/<id>` in the app, edit, click **save as final**. The app computes the diff.
-4. `cfs posts` → pi reads the diff, derives 1–3 voice lessons, pushes each with `cfs lesson`.
-5. Next time, pi reads `cfs lessons` first and writes to them.
-
-See `skills/content-from-shipping/SKILL.md` for the full workflow and what counts as a good lesson.
-
-## Data
-
-- **App DB**: `data/content.db` (override `CFS_DB=/path.db`).
-- **pi sessions** (ingester source): `~/.pi/agent/sessions/` (override `PI_HOME`).
-
-## License
-
-MIT
+An earlier iteration had a Next.js app + `cfs` CLI + a Bun ingester. The app was infrastructure (server, DB, bridge) to serve one step — editing a draft — that a plain editor + git already handles. The agent can read session files itself; it doesn't need an ingester. So it collapsed to a skill. The full history of that iteration is in the git tree if you want it back.
