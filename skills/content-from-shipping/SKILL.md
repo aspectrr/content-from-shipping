@@ -2,27 +2,32 @@
 name: content-from-shipping
 description: >-
   Turn pi agent sessions into content — devlogs, changelogs, social posts — in the
-  user's voice, and learn voice from every edit. No server, no CLI bridge: the
-  agent reads session files directly, writes drafts as markdown, and learns from
-  git diffs. Activate when the user wants to write about work they shipped, pull
-  conversation history from recent sessions, draft a devlog, or learn voice from
-  an edit they made.
+  user's voice, and learn voice from every edit. Pulls conversation history from
+  session files, drafts into redline (the local revision-pair + voice-pattern
+  library), and learns from the user's edits. Activate when the user wants to
+  write about work they shipped, pull conversation history from recent sessions,
+  or draft a devlog from recent activity.
 ---
 
 # content-from-shipping
 
-Turn shipping into content in the user's voice. **You (the agent) do everything**: read the session files, decide what's worth writing, draft it as markdown, and — after the user edits — derive voice lessons from the diff. The only infrastructure is files and git.
+Turn shipping into content in the user's voice. This skill does one half: **pulls session history and decides what's worth writing.** The other half — storing drafts, computing diffs, linting against voice patterns, accumulating lessons — is **redline's job.** Drafts you push land in the redline app for the user to edit.
 
-## Where things live
+## Two tools, one loop
 
-| Thing | Path | Notes |
-|---|---|---|
-| pi sessions | `~/.pi/agent/sessions/<encoded-cwd>/*.jsonl` | `$PI_HOME/agent/sessions` if `PI_HOME` set |
-| content root | `~/content` (override: `$CFS_CONTENT`) | a git repo you manage |
-| drafts | `<content>/drafts/<YYYY-MM-DD>-<slug>.md` | you write here; user edits in place |
-| voice lessons | `<content>/VOICE.md` | how the user writes; read before drafting |
+```
+  ~/.pi/agent/sessions/*.jsonl     redline (CLI / MCP / Tauri app, one SQLite DB)
+  ────────────────────────         ─────────────────────────────────────────────
+  YOU read sessions directly       redline draft    → draft in the app's inbox
+  pick what's worth a post         redline lessons  → calibrate voice before writing
+  draft into redline ───────────►  redline lint     → auto-checks against patterns
+                                   (user edits in the redline app)
+                                   redline finalize → computes draft→final diff
+                                   redline analyze  → what changed (deletions, swaps)
+                                   redline add-lesson + add-pattern → learn
+```
 
-If `<content>` isn't a git repo yet, bootstrap it: `mkdir -p ~/content/drafts && cd ~/content && git init`. Commit drafts so `git diff` can reveal the user's later edits.
+redline is already installed (`redline` on PATH, DB at `~/.redline/emails.db`). If the `redline` MCP server is connected in this session, prefer its tools (`create_draft`, `list_lessons`, `finalize_draft`, `analyze_diff`, `add_lesson`, `add_pattern`) over shelling out — same data, no subprocess per call. Either surface works.
 
 ## Pull conversation history
 
@@ -69,31 +74,50 @@ jq -rc 'select(.type=="message") | .message.content[]? |
   else empty end' <session.jsonl>
 ```
 
-For the full, unabridged record (every block, every turn), just `read` the file directly — sessions aren't large. Use the jq extract to triage many sessions fast, then `read` the one or two worth writing about.
+For the full, unabridged record, just `read` the file directly. Use the jq extract to triage many sessions fast, then `read` the one or two worth writing about.
 
 ## Workflow A — draft a new piece
 
 1. **Find recent work.** Ask which repo (or take the busiest). List its recent sessions (above). Scan headers + intents to see what happened.
-2. **Calibrate voice before writing.** `read ~/content/VOICE.md`. Those are the rules. On cold start (empty file) draft to your best general standard; the loop teaches you from the first edit.
+2. **Calibrate voice before writing.** Read the accumulated lessons and patterns:
+   ```bash
+   redline lessons                    # voice rules derived from past edits
+   redline list-patterns              # matchable patterns the lint engine enforces
+   ```
+   These are your constraints. On cold start (empty), draft to your best general standard; the loop teaches you from the first edit.
 3. **Pick the highest-signal session.** Not every session is a post. Worth writing when there's: a clear stated intent, an interesting journey (a decision, a course correction, a dead end), and a tangible outcome. **The `thinking` blocks are the gold** — that's the "why" and "what was hard." Most sessions aren't a post; you decide.
-4. **Draft** in the requested format (default devlog), applying every applicable voice lesson. Write to `<content>/drafts/<YYYY-MM-DD>-<slug>.md`.
-5. **Commit it** so there's a baseline for later diffing: `git -C ~/content add drafts/<file> && git -C ~/content commit -m "draft: <slug>"`.
-6. **Hand off.** Tell the user the path to edit. Don't finalize yourself unless asked.
+4. **Draft** in the requested format (see *Content formats*), applying every applicable lesson and avoiding every pattern. Write to a temp file.
+5. **Push the draft to redline:**
+   ```bash
+   redline draft post.md --context "devlog: <repo>, last 7d" --tags devlog,content
+   ```
+   This prints the **draft id** plus all **stored voice patterns** and any **lint violations** — it auto-lints on creation. If there are violations, rewrite the file to fix them, then delete + re-push (`redline delete-draft <id>`; `redline draft …`). Repeat until clean.
+6. **Hand off.** Tell the user the draft is in the redline app's Drafts inbox — they edit it there. Note the draft id so you can finalize later.
 
 ## Workflow B — learn from an edit (the closed loop)
 
-This is where voice compounds. The user edited your draft.
+The user edited your draft in the redline app. Now voice compounds.
 
-1. **See what they changed:**
+1. **Finalize** (the user tells you they're done, or you check `redline drafts` for status):
    ```bash
-   git -C ~/content diff -- drafts/<file>.md          # uncommitted edits vs the committed draft
-   # or, if they committed the final:
-   git -C ~/content log --oneline -- drafts/<file>.md
-   git -C ~/content diff <draft-sha>..HEAD -- drafts/<file>.md
+   redline finalize <draft_id>
    ```
-2. **Derive 1–3 specific voice lessons** from the diff (see *What counts as a good lesson*). Voice = *how they write*, not what they chose to write about.
-3. **Append each to `~/content/VOICE.md`** — under `## Candidates` if it's the first sighting, or promote to `## Confirmed` if you've seen the pattern 2–3 times.
-4. Commit: `git -C ~/content add VOICE.md drafts/<file> && git -C ~/content commit -m "learn: <slug>"`.
+   Prints the **pair id** plus **diff analysis** (deletions, additions, word swaps, categorized changes, existing-pattern hits) and any **auto-promoted patterns**. For a deeper dive: `redline analyze <pair_id>`.
+2. **Derive 1–3 voice lessons** from the analysis. **Deletions are the strongest signal** — what got cut entirely is what the user's voice rejects. Word swaps show specific before→after preferences. See *What counts as a good lesson*.
+3. **Store each lesson + a matchable pattern:**
+   ```bash
+   redline add-lesson <pair_id> "Open devlogs with the tension, not 'This week I…'." --tags devlog,content
+   redline add-pattern --rule "Don't open with week-in-review framing" --pattern "This week I" --category style
+   ```
+   **Always create a pattern alongside a lesson.** Lessons without patterns don't lint — future drafts won't catch the issue. Patterns auto-promote from `unconfirmed` → `confirmed` after appearing in 3+ pairs' drafts (runs automatically on `finalize`).
+
+## Content formats
+
+- **Devlog** — narrative. Hook (the question/tension) → journey (decisions, one wrong turn) → outcome. First person, direct. Uses reasoning traces heavily.
+- **Changelog** — terse, user-facing. Grouped bullets, what changed for the user. No journey.
+- **Social** — one idea, punchy. A single insight distilled, not a recap.
+
+Default to devlog when unspecified. Tags: `devlog`, `changelog`, `social`, always with `content` so they're distinguishable from email pairs in the shared DB.
 
 ## What counts as a good lesson
 
@@ -108,37 +132,32 @@ Bad (reject):
 - "Be clear and engaging." (generic)
 - "Mention the repo name." (content, not voice)
 
-**Negative lessons are gold** — things the user never does. Capture them. Don't over-fit: a swap seen once is a candidate; promote only after 2–3 sightings.
+**Negative lessons are gold** — things the user never does. Capture them. Don't over-fit: one sighting is a candidate (pattern starts `unconfirmed`); it auto-promotes after 3+ sightings.
 
-## VOICE.md shape
+## redline command reference
 
-```markdown
-# Voice
+| CLI | MCP tool | Purpose |
+|---|---|---|
+| `redline draft <file> --context --tags` | `create_draft` | Push draft; returns id + patterns + lint violations |
+| `redline lessons [--tags]` | `list_lessons` | Read voice lessons (calibrate before writing) |
+| `redline list-patterns` | `list_patterns` | Matchable patterns the lint engine enforces |
+| `redline lint <draft_id>` / `--text` | — | Check a draft (or raw text) against patterns |
+| `redline finalize <draft_id>` | `finalize_draft` | Draft→final pair; returns diff analysis + promotions |
+| `redline analyze <pair_id>` | `analyze_diff` | Deletions, categorized changes, word swaps, hits |
+| `redline add-lesson <pair_id> "<text>" --tags` | `add_lesson` | Store a derived voice lesson |
+| `redline add-pattern --rule --pattern --category` | `add_pattern` | Create a matchable pattern (literal or regex) |
+| `redline show <pair_id>` | `show_pair` | Read a pair: draft, final, diff |
+| `redline recent [N]` | `recent_pairs` | Skim recent finalized pairs |
+| `redline drafts [--all]` | `list_drafts` | In-flight drafts (check edit status) |
+| `redline delete-draft <id>` | `delete_draft` | Remove a draft (keeps any finalized pair) |
 
-How the user writes. Derived from draft→final edits. Read before drafting.
-
-## Confirmed
-(repeatable across ≥2 posts)
-- Open with the tension, not "This week I…".
-- …
-
-## Candidates
-(seen once — promote after a repeat)
-- …
-```
-
-## Format guidance
-
-- **Devlog** — narrative. Hook (the question/tension) → journey (decisions, one wrong turn) → outcome. First person, direct. Uses reasoning traces heavily.
-- **Changelog** — terse, user-facing. Grouped bullets, what changed for the user. No journey.
-- **Social** — one idea, punchy. A single insight distilled, not a recap.
-
-Default to devlog when unspecified.
+Load the `redline` skill for full details on pattern types (literal vs regex), directions (avoid vs prefer), and the lint engine.
 
 ## Failure modes
 
 - **Treating sessions as a summary dump.** You decide what's worth a post; most sessions aren't.
 - **Ignoring `thinking` blocks.** The reasoning trace is what makes narrative possible — use it.
+- **Storing lessons without patterns.** Patterns are what make future drafts auto-lint. Always pair them.
 - **Storing content lessons as voice lessons.** Voice = how, not what.
-- **Over-fitting to one edit.** Confirm across posts before promoting.
+- **Over-fitting to one edit.** Patterns start `unconfirmed` and auto-promote after 3+ sightings — let the system handle confirmation.
 - **Generic lessons.** If you can't say *what specifically changed*, don't store a lesson.
