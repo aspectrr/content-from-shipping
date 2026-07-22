@@ -2,8 +2,5 @@
 .pi/
 .pi-lens/
 
-# Voice CLI (legacy standalone, orphaned — see README)
-voice/target/
-
-# Local voice DBs (default lives in ~/.content-learn/)
+# Local voice DBs (legacy — lessons now live in VOICE.md)
 *.db

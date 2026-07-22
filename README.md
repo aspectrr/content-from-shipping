@@ -6,10 +6,7 @@ Turn pi agent sessions into content — devlogs, changelogs, social posts — in
 
 ## What's here
 
-| Path | What |
-|---|---|
-| `skills/content-from-shipping/SKILL.md` | The skill. Teaches the agent to pull conversation history, draft, and learn from edits. |
-| `voice/` | Legacy standalone lesson store (Rust, forked from email-for-agents). **Orphaned** — lessons now live in `~/content/VOICE.md`. Kept for reference; safe to delete. |
+Just one thing: `skills/content-from-shipping/SKILL.md` — the skill that teaches the agent to pull conversation history, draft, and learn from edits.
 
 ## How the loop works
 
@@ -39,4 +36,4 @@ Then in any pi session, ask it to draft a devlog from recent work. The skill act
 
 ## Why no app?
 
-An earlier iteration had a Next.js app + `cfs` CLI + a Bun ingester. The app was infrastructure (server, DB, bridge) to serve one step — editing a draft — that a plain editor + git already handles. The agent can read session files itself; it doesn't need an ingester. So it collapsed to a skill. The full history of that iteration is in the git tree if you want it back.
+An earlier iteration had a Next.js app + `cfs` CLI + a Bun ingester. The app was infrastructure (server, DB, bridge) to serve one step — editing a draft — that a plain editor + git already handles. The agent can read session files itself; it doesn't need an ingester. So it collapsed to a skill. The full history of those iterations (app + CLI + ingester, and a legacy Rust lesson store) is in the git tree if you want any of it back.
