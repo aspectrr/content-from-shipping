@@ -1,3 +1,6 @@
 # Pix Agent
 .pi/
 .pi-lens/
+
+# Local voice DBs (legacy — lessons now live in VOICE.md)
+*.db
